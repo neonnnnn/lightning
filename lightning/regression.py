@@ -7,3 +7,4 @@ from .impl.sag import SAGARegressor
 from .impl.sdca import SDCARegressor
 from .impl.sgd import SGDRegressor
 from .impl.svrg import SVRGRegressor
+from .impl.omp import OMPRegressor
