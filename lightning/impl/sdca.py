@@ -56,6 +56,13 @@ class _BaseSDCA(object):
         rng = check_random_state(self.random_state)
         loss = self._get_loss()
 
+        n_nonzero_coefs = self.n_nonzero_coefs
+        if n_nonzero_coefs is not None:
+            if not isinstance(n_nonzero_coefs, int) or n_nonzero_coefs < 1:
+                raise ValueError("n_nonzero_coefs must be positive integer.")
+        else:
+            n_nonzero_coefs = n_features
+        
         for i in xrange(n_vectors):
             y = Y[:, i]
 
@@ -67,7 +74,8 @@ class _BaseSDCA(object):
 
             _prox_sdca_fit(self, ds, y, self.coef_[i], self.dual_coef_[i],
                            alpha1, alpha2, loss, self.gamma, self.max_iter,
-                           tol, self.callback, n_calls, self.verbose, rng)
+                           tol, self.callback, n_calls, self.verbose, rng,
+                           n_nonzero_coefs)
 
         return self
 
@@ -97,6 +105,9 @@ class SDCAClassifier(BaseClassifier, _BaseSDCA):
         stopping criterion tolerance.
     max_iter : int
         maximum number of outer iterations (also known as epochs).
+    n_nonzero_coefs: int
+        Desired number of non-zero entries in the solution. If None (default),
+        entries are not selected. If l1_ratio != 0, this parameter is ignored.
     verbose : int
         verbosity level. Set positive to print progress information.
     callback : callable or None
@@ -107,13 +118,14 @@ class SDCAClassifier(BaseClassifier, _BaseSDCA):
     """
 
     def __init__(self, alpha=1.0, l1_ratio=0, loss="hinge", gamma=1.0,
-                 max_iter=100, tol=1e-3, callback=None, n_calls=None, verbose=0,
-                 random_state=None):
+                 max_iter=100, n_nonzero_coefs=None, tol=1e-3, callback=None,
+                 n_calls=None, verbose=0, random_state=None):
         self.alpha = alpha
         self.l1_ratio = l1_ratio
         self.loss = loss
         self.gamma = gamma
         self.max_iter = max_iter
+        self.n_nonzero_coefs = n_nonzero_coefs
         self.tol = tol
         self.callback = callback
         self.n_calls = n_calls
@@ -158,6 +170,9 @@ class SDCARegressor(BaseRegressor, _BaseSDCA):
         stopping criterion tolerance.
     max_iter : int
         maximum number of outer iterations (also known as epochs).
+    n_nonzero_coefs: int
+        Desired number of non-zero entries in the solution. If None (default),
+        entries are not selected. If l1_ratio != 0, this parameter is ignored.
     verbose : int
         verbosity level. Set positive to print progress information.
     callback : callable or None
@@ -168,13 +183,14 @@ class SDCARegressor(BaseRegressor, _BaseSDCA):
     """
 
     def __init__(self, alpha=1.0, l1_ratio=0, loss="squared",
-                 max_iter=100, tol=1e-3, callback=None, n_calls=None, verbose=0,
-                 random_state=None):
+                 max_iter=100, n_nonzero_coefs=None, tol=1e-3, callback=None, 
+                 n_calls=None, verbose=0, random_state=None):
         self.alpha = alpha
         self.l1_ratio = l1_ratio
         self.loss = loss
         self.gamma = 1.0
         self.max_iter = max_iter
+        self.n_nonzero_coefs = n_nonzero_coefs
         self.tol = tol
         self.callback = callback
         self.n_calls = n_calls

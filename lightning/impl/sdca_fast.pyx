@@ -22,7 +22,9 @@ cdef _add_l2(double* data,
              int n_nz,
              double* w,
              double update,
-             double* regul):
+             double* regul,
+             int* n_nz_coefs,
+             int* indices_nonzero_coefs):
 
     cdef int j, jj
     cdef double delta, w_old
@@ -33,6 +35,9 @@ cdef _add_l2(double* data,
         w_old = w[j]
         w[j] += delta
         regul[0] += delta * (2 * w_old + delta)
+        if w_old == 0 and w[j] != 0:
+            indices_nonzero_coefs[n_nz_coefs[0]] = j           
+            n_nz_coefs[0] += 1
 
 
 cdef inline double _truncate(double v,
@@ -43,6 +48,62 @@ cdef inline double _truncate(double v,
         return v + sigma
     else:
         return 0
+
+
+cdef void _hard_thresholding(double* w,
+                             int* indices_nonzero_coefs,
+                             int max_n_nz_coefs,
+                             int n_nz_coefs,
+                             int n_features):
+    cdef Py_ssize_t j, jj, offset, n_candidates, pivot
+    cdef Py_ssize_t n_uppers, n_lowers, n_uppers_incr, n_lowers_incr
+    cdef double w_abs_pivot
+    n_candidates = n_nz_coefs
+    offset = 0
+    n_lowers = 0
+    n_uppers = 0
+    n_uppers_incr = 0
+    pivot = indices_nonzero_coefs[n_nz_coefs-1]
+    w_abs_pivot = fabs(w[pivot])
+    # indices_nonzero_coefs[0:max_n_nz_coefs]: non-shrinked indices
+    # indices_nonzero_coefs[n_features:]: shrinked indices
+    while (n_uppers+n_uppers_incr) != max_n_nz_coefs:
+        n_uppers_incr = 0
+        n_lowers_incr = 0
+        for jj in range(n_candidates-1):
+            j = indices_nonzero_coefs[offset+jj]
+            if fabs(w[j]) > w_abs_pivot:
+                indices_nonzero_coefs[n_uppers+n_uppers_incr] = j
+                n_uppers_incr += 1
+            else:
+                indices_nonzero_coefs[n_features+n_lowers+n_lowers_incr] = j
+                n_lowers_incr += 1
+
+        if (n_uppers+n_uppers_incr) >= max_n_nz_coefs: # search in uppers
+            indices_nonzero_coefs[n_features+n_lowers+n_lowers_incr] = pivot
+            n_lowers_incr += 1
+            n_candidates = n_uppers_incr
+            offset = n_uppers
+            n_lowers += n_lowers_incr
+        else: # search in lowers
+            indices_nonzero_coefs[n_uppers+n_uppers_incr] = pivot
+            n_uppers_incr += 1
+            n_candidates = n_lowers_incr
+            offset = n_features+n_lowers
+            n_uppers += n_uppers_incr
+            n_uppers_incr = 0
+
+        pivot = indices_nonzero_coefs[offset]
+        w_abs_pivot = fabs(w[pivot])
+        indices_nonzero_coefs[offset] = indices_nonzero_coefs[offset+n_candidates-1]
+        indices_nonzero_coefs[offset+n_candidates-1] = pivot
+
+    # hard thresholding
+    jj = 0
+    while jj < (n_nz_coefs-max_n_nz_coefs):
+        j = indices_nonzero_coefs[n_features+jj]
+        w[j] = 0
+        jj += 1
 
 
 cdef _add_elastic(double* data,
@@ -117,7 +178,10 @@ cdef _solve_subproblem(double*data,
                        double gamma,
                        double* primal,
                        double* dual,
-                       double* regul):
+                       double* regul,
+                       int max_n_nz_coefs,
+                       int* n_nz_coefs,
+                       int* indices_nonzero_coefs):
 
     cdef double pred, dcoef_old, residual, error, loss, update
 
@@ -191,7 +255,8 @@ cdef _solve_subproblem(double*data,
             _add_elastic(data, indices, n_nz, w, v, update * scale, regul,
                          sigma)
         else:
-            _add_l2(data, indices, n_nz, w, update * scale, regul)
+            _add_l2(data, indices, n_nz, w, update * scale, regul, n_nz_coefs, 
+                    indices_nonzero_coefs)
 
 
 def _prox_sdca_fit(self,
@@ -208,7 +273,8 @@ def _prox_sdca_fit(self,
                    callback,
                    int n_calls,
                    int verbose,
-                   rng):
+                   rng,
+                   int max_n_nz_coefs):
 
     cdef int n_samples = X.get_n_samples()
     cdef int n_features = X.get_n_features()
@@ -238,6 +304,15 @@ def _prox_sdca_fit(self,
     cdef int* indices
     cdef int n_nz
 
+    # for dual iterative hard thresholding
+    cdef int n_nz_coefs = 0
+    cdef np.ndarray[int, ndim=1] indices_nonzero_coefs
+    indices_nonzero_coefs = np.zeros(n_features*2, dtype=np.int32)
+    for i in range(n_features):
+        if w[i] != 0:
+            indices_nonzero_coefs[n_nz_coefs] = i
+            n_nz_coefs += 1
+
     if alpha1 > 0:  # Elastic-net case
         sigma = alpha1 / alpha2
     else:  # L2-only case
@@ -266,8 +341,15 @@ def _prox_sdca_fit(self,
 
             _solve_subproblem(data, indices, n_nz, y[i], w, v, dcoef + i,
                               loss_func, sqnorms[i], scale, sigma, gamma,
-                              &primal, &dual, &regul)
-
+                              &primal, &dual, &regul, max_n_nz_coefs,
+                              &n_nz_coefs, &indices_nonzero_coefs[0])
+            # hard thresholding
+            if max_n_nz_coefs is not None:
+                if n_nz_coefs > max_n_nz_coefs:
+                    _hard_thresholding(w, &indices_nonzero_coefs[0], 
+                                       max_n_nz_coefs, n_nz_coefs,
+                                       n_features)
+                n_nz_coefs = max_n_nz_coefs
             if has_callback and t % n_calls == 0:
                 ret = callback(self)
                 if ret is not None:
