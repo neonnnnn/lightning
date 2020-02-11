@@ -27,12 +27,7 @@ cdef inline void _swap(int* arr, int a, int b):
 
 
 cdef class LossFunction:
-
-    cdef int max_steps
-    cdef double sigma
-    cdef double beta
-    cdef int verbose
-
+    
     # L2 regularization
 
     cdef void solve_l2(self,

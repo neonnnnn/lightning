@@ -65,6 +65,11 @@ def configuration(parent_package='', top_path=None):
                          language='c++',
                          include_dirs=[numpy.get_include(), randomdir])
 
+    config.add_extension('omp_primal_cd_fast',
+                         sources=['omp_primal_cd_fast.pyx'],
+                         language='c++',
+                         include_dirs=[numpy.get_include(), randomdir])
+
     config.add_subpackage('datasets')
     config.add_subpackage('randomkit')
     config.add_subpackage('tests')
